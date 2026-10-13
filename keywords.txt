@@ -1,0 +1,41 @@
+#######################################
+# Syntax Coloring Map For IOTFIY
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+IOTFIY	KEYWORD1
+IOTFIYManager	KEYWORD1
+Send	KEYWORD1
+Receive	KEYWORD1
+DeviceConfig	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+config	KEYWORD2
+createSend	KEYWORD2
+createReceive	KEYWORD2
+registerAllCapabilities	KEYWORD2
+publishAllSendData	KEYWORD2
+reconnectMQTT	KEYWORD2
+checkAndReconnectWiFi	KEYWORD2
+isMQTTConnected	KEYWORD2
+processMQTTMessages	KEYWORD2
+registerCapability	KEYWORD2
+publishData	KEYWORD2
+handleCommand	KEYWORD2
+ssid	KEYWORD2
+password	KEYWORD2
+server	KEYWORD2
+port	KEYWORD2
+clientId	KEYWORD2
+deviceId	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
