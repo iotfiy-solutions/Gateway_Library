@@ -2,9 +2,22 @@
 #define IOTFIY_H
 
 #include <Arduino.h>
-#include <WiFi.h>
-#define MQTT_MAX_PACKET_SIZE 512
-#define TCP_BUFFER_SIZE 1024
+
+// ESP32 uses WiFi.h; ESP8266 uses ESP8266WiFi.h (same WiFiClient / WiFi API surface)
+#if defined(ESP8266)
+  #include <ESP8266WiFi.h>
+#elif defined(ESP32)
+  #include <WiFi.h>
+#else
+  #error "IOTFIY supports ESP8266 and ESP32 only"
+#endif
+
+#ifndef MQTT_MAX_PACKET_SIZE
+  #define MQTT_MAX_PACKET_SIZE 512
+#endif
+#ifndef TCP_BUFFER_SIZE
+  #define TCP_BUFFER_SIZE 1024
+#endif
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "DeviceConfig.h"

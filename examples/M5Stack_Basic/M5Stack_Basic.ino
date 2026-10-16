@@ -1,6 +1,6 @@
 #include <M5Unified.h>
 #include <IOTFIY.h>
-#include <WiFi.h>
+// WiFi comes from IOTFIY.h (ESP32 → WiFi.h / ESP8266 → ESP8266WiFi.h)
 
 // WiFi
 const char* WIFI_SSID     = "IOTF2";

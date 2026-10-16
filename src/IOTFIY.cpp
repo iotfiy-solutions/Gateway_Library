@@ -16,7 +16,9 @@ void IOTFIYManager::enableLWT(bool enabled) {
 
 // Initialize
 void IOTFIYManager::begin() {
-  // Setup client
+  // Keep PubSubClient buffer aligned with MQTT_MAX_PACKET_SIZE (ESP8266 + ESP32).
+  // Older PubSubClient builds use the compile-time define; newer ones also honor setBufferSize.
+  _mqttClient.setBufferSize(MQTT_MAX_PACKET_SIZE);
   _mqttClient.setServer(_config.getMQTTServer(), _config.getMQTTPort());
   _mqttClient.setCallback([this](char* topic, byte* payload, unsigned int length) {
     this->handleCallback(topic, payload, length);
@@ -96,17 +98,29 @@ bool IOTFIYManager::publishStringOutput(const char* name, const char* pin, const
 
 // Process incoming commands
 void IOTFIYManager::handleCallback(char* topic, byte* payload, unsigned int length) {
-  // Create a null-terminated string from the payload
-  char message[length + 1];
+  // Fixed + static buffer for ESP8266 and ESP32 (no VLA, off the stack).
+  // MQTT callback is not re-entrant, so a shared static buffer is safe.
+  static char message[MQTT_MAX_PACKET_SIZE + 1];
+  const unsigned int kMaxPayload = MQTT_MAX_PACKET_SIZE;
+
+  if (length > kMaxPayload) {
+    Serial.print("MQTT payload too large (");
+    Serial.print(length);
+    Serial.print(" > ");
+    Serial.print(kMaxPayload);
+    Serial.println("), truncated");
+    length = kMaxPayload;
+  }
+
   memcpy(message, payload, length);
   message[length] = '\0';
-  
+
   // Log received message for debugging
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
   Serial.println(message);
-  
+
   // Parse the JSON command
   DynamicJsonDocument doc(512);
   DeserializationError error = deserializeJson(doc, message);
@@ -294,30 +308,42 @@ bool IOTFIYManager::reconnectMQTT() {
 }
 
 bool IOTFIYManager::checkAndReconnectWiFi() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi connection lost. Reconnecting...");
-    
-    WiFi.begin(_config.getSSID(), _config.getPassword());
-    
-    // Wait with timeout for connection
-    int attempt = 0;
-    while (WiFi.status() != WL_CONNECTED && attempt < 20) {
-      delay(500);
-      Serial.print(".");
-      attempt++;
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("");
-      Serial.print("WiFi reconnected. IP address: ");
-      Serial.println(WiFi.localIP());
-      return true;
-    } else {
-      Serial.println("WiFi reconnection failed!");
-      return false;
-    }
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
   }
-  return true; // Already connected
+
+  Serial.println("WiFi connection lost. Reconnecting...");
+
+  // ESP32 error "sta is connecting, cannot set config" happens if WiFi.begin()
+  // is called again while a previous connect is still in progress (common when
+  // loop() retries immediately). Clear the old attempt first on both boards.
+  WiFi.disconnect();
+#if defined(ESP8266)
+  delay(100);
+  WiFi.mode(WIFI_STA);
+#else
+  delay(200);
+  WiFi.mode(WIFI_STA);
+#endif
+
+  WiFi.begin(_config.getSSID(), _config.getPassword());
+
+  int attempt = 0;
+  while (WiFi.status() != WL_CONNECTED && attempt < 20) {
+    delay(500);
+    Serial.print(".");
+    attempt++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("");
+    Serial.print("WiFi reconnected. IP address: ");
+    Serial.println(WiFi.localIP());
+    return true;
+  }
+
+  Serial.println("WiFi reconnection failed!");
+  return false;
 }
 
 bool IOTFIYManager::isMQTTConnected() {
