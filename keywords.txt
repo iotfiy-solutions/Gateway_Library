@@ -18,16 +18,12 @@ DeviceConfig	KEYWORD1
 
 begin	KEYWORD2
 config	KEYWORD2
-enableLWT	KEYWORD2
 write	KEYWORD2
 read	KEYWORD2
 launch	KEYWORD2
 publishStringOutput	KEYWORD2
 registerAllCapabilities	KEYWORD2
-reconnectMQTT	KEYWORD2
-checkAndReconnectWiFi	KEYWORD2
 isMQTTConnected	KEYWORD2
-processMQTTMessages	KEYWORD2
 registerCapability	KEYWORD2
 publishData	KEYWORD2
 handleCommand	KEYWORD2
@@ -35,7 +31,6 @@ ssid	KEYWORD2
 password	KEYWORD2
 server	KEYWORD2
 port	KEYWORD2
-clientId	KEYWORD2
 deviceId	KEYWORD2
 mqttUsername	KEYWORD2
 mqttPassword	KEYWORD2

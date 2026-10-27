@@ -1,17 +1,11 @@
 #include "IOTFIY.h"
 
 // Constructor
-IOTFIYManager::IOTFIYManager() : _sendCount(0), _receiveCount(0), _mqttClient(_wifiClient), _lwtEnabled(false) {}
+IOTFIYManager::IOTFIYManager() : _sendCount(0), _receiveCount(0), _mqttClient(_wifiClient) {}
 
 // Config access
 DeviceConfig& IOTFIYManager::config() { 
   return _config; 
-}
-
-void IOTFIYManager::enableLWT(bool enabled) {
-  _lwtEnabled = enabled;
-  Serial.print("MQTT LWT ");
-  Serial.println(enabled ? "ENABLED (offline on disconnect)" : "disabled");
 }
 
 // Initialize
@@ -57,8 +51,30 @@ void IOTFIYManager::registerAllCapabilities() {
   _mqttClient.publish(_config.getStatusTopic().c_str(), endPayload.c_str());
 }
 
-// Publish all send data
+// Maintain WiFi/MQTT, process commands, then publish all send data
 void IOTFIYManager::launch() {
+  bool wifiOk = checkAndReconnectWiFi();
+
+  if (wifiOk && !_mqttClient.connected()) {
+    reconnectMQTT();
+  }
+
+  if (_mqttClient.connected()) {
+    processMQTTMessages();
+  }
+
+  bool mqttOk = _mqttClient.connected();
+  if (!_statusInitialized || wifiOk != _lastWifiOk || mqttOk != _lastMqttOk) {
+    printConnectionStatus(wifiOk, mqttOk);
+    _lastWifiOk = wifiOk;
+    _lastMqttOk = mqttOk;
+    _statusInitialized = true;
+  }
+
+  if (!mqttOk) {
+    return;
+  }
+
   for (int i = 0; i < _sendCount; i++) {
     _sends[i]->publishData();
   }
@@ -89,11 +105,16 @@ bool IOTFIYManager::publishStringOutput(const char* name, const char* pin, const
   data[pin] = value;
   String dataPayload;
   serializeJson(dataDoc, dataPayload);
+  String topic = _config.getDataTopic();
   Serial.print("String output ");
   Serial.print(pin);
   Serial.print("=");
-  Serial.println(value);
-  return _mqttClient.publish(_config.getDataTopic().c_str(), dataPayload.c_str());
+  Serial.print(value);
+  Serial.print(" -> ");
+  Serial.println(topic);
+  bool ok = _mqttClient.publish(topic.c_str(), dataPayload.c_str());
+  _mqttClient.loop();
+  return ok;
 }
 
 // Process incoming commands
@@ -229,45 +250,42 @@ bool IOTFIYManager::reconnectMQTT() {
     willDoc["deviceId"] = _config.getDeviceID();
     String willPayload;
     serializeJson(willDoc, willPayload);
-    
-    bool connected;
-    if (_lwtEnabled) {
-      if (_config.getMQTTUsername()[0] != '\0') {
-        connected = _mqttClient.connect(
-          _config.getMQTTClientID(),
-          _config.getMQTTUsername(),
-          _config.getMQTTPassword(),
-          willTopic.c_str(),
-          1,    // will QoS
-          true, // will retain
-          willPayload.c_str()
-        );
-      } else {
-        connected = _mqttClient.connect(
-          _config.getMQTTClientID(),
-          willTopic.c_str(),
-          1,
-          true,
-          willPayload.c_str()
-        );
-      }
-    } else if (_config.getMQTTUsername()[0] != '\0') {
+
+    // deviceId is used as the MQTT client id; LWT is always enabled
+    bool connected = false;
+    const char* mqttClientId = _config.getDeviceID();
+    if (_config.getMQTTUsername()[0] != '\0') {
       connected = _mqttClient.connect(
-        _config.getMQTTClientID(),
+        mqttClientId,
         _config.getMQTTUsername(),
-        _config.getMQTTPassword()
+        _config.getMQTTPassword(),
+        willTopic.c_str(),
+        1,    // will QoS
+        true, // will retain
+        willPayload.c_str()
       );
     } else {
-      connected = _mqttClient.connect(_config.getMQTTClientID());
+      connected = _mqttClient.connect(
+        mqttClientId,
+        willTopic.c_str(),
+        1,
+        true,
+        willPayload.c_str()
+      );
     }
 
     if (connected) {
       Serial.println("connected!");
-      if (_lwtEnabled) {
-        Serial.print("LWT registered on ");
-        Serial.println(willTopic);
-      }
+      Serial.print("LWT registered on ");
+      Serial.println(willTopic);
+      Serial.print("Device ID: ");
+      Serial.println(_config.getDeviceID());
       _mqttClient.subscribe(_config.getCommandsTopic().c_str());
+
+      // Force next launch() to re-publish current output values
+      for (int i = 0; i < _sendCount; i++) {
+        _sends[i]->resetPublishState();
+      }
 
       // Send online status
       DynamicJsonDocument statusDoc(128);
@@ -275,33 +293,34 @@ bool IOTFIYManager::reconnectMQTT() {
       statusDoc["deviceId"] = _config.getDeviceID();
       String statusPayload;
       serializeJson(statusDoc, statusPayload);
-      _mqttClient.publish(_config.getStatusTopic().c_str(), statusPayload.c_str(), true);
+      String statusTopic = _config.getStatusTopic();
+      _mqttClient.publish(statusTopic.c_str(), statusPayload.c_str(), true);
+      _mqttClient.loop();
       
       // Register capabilities
       registerAllCapabilities();
       return true;
-    } else {
-      int state = _mqttClient.state();
-      Serial.print("failed, state=");
-      Serial.print(state);
-      Serial.print(" (");
-      // Print human-readable error
-      switch(state) {
-        case -4: Serial.print("MQTT_CONNECTION_TIMEOUT"); break;
-        case -3: Serial.print("MQTT_CONNECTION_LOST"); break;
-        case -2: Serial.print("MQTT_CONNECT_FAILED"); break;
-        case -1: Serial.print("MQTT_DISCONNECTED"); break;
-        case 1: Serial.print("MQTT_CONNECT_BAD_PROTOCOL"); break;
-        case 2: Serial.print("MQTT_CONNECT_BAD_CLIENT_ID"); break;
-        case 3: Serial.print("MQTT_CONNECT_UNAVAILABLE"); break;
-        case 4: Serial.print("MQTT_CONNECT_BAD_CREDENTIALS"); break;
-        case 5: Serial.print("MQTT_CONNECT_UNAUTHORIZED"); break;
-      }
-      Serial.println(")");
-      
-      if (attempts < 5) {
-        delay(5000);
-      }
+    }
+
+    int state = _mqttClient.state();
+    Serial.print("failed, state=");
+    Serial.print(state);
+    Serial.print(" (");
+    switch (state) {
+      case -4: Serial.print("MQTT_CONNECTION_TIMEOUT"); break;
+      case -3: Serial.print("MQTT_CONNECTION_LOST"); break;
+      case -2: Serial.print("MQTT_CONNECT_FAILED"); break;
+      case -1: Serial.print("MQTT_DISCONNECTED"); break;
+      case 1: Serial.print("MQTT_CONNECT_BAD_PROTOCOL"); break;
+      case 2: Serial.print("MQTT_CONNECT_BAD_CLIENT_ID"); break;
+      case 3: Serial.print("MQTT_CONNECT_UNAVAILABLE"); break;
+      case 4: Serial.print("MQTT_CONNECT_BAD_CREDENTIALS"); break;
+      case 5: Serial.print("MQTT_CONNECT_UNAUTHORIZED"); break;
+    }
+    Serial.println(")");
+
+    if (attempts < 5) {
+      delay(5000);
     }
   }
   return false;
@@ -346,69 +365,225 @@ bool IOTFIYManager::checkAndReconnectWiFi() {
   return false;
 }
 
-bool IOTFIYManager::isMQTTConnected() {
-  return _mqttClient.connected();
-}
-
 void IOTFIYManager::processMQTTMessages() {
   _mqttClient.loop();
 }
 
+void IOTFIYManager::printConnectionStatus(bool wifiOk, bool mqttOk) {
+  Serial.print("WiFi: ");
+  if (wifiOk) {
+    Serial.print("connected");
+    Serial.print("  IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("not connected");
+  }
+
+  Serial.print("MQTT: ");
+  Serial.println(mqttOk ? "connected" : "not connected");
+}
+
+bool IOTFIYManager::isMQTTConnected() {
+  return _mqttClient.connected();
+}
+
 // Direct configuration method
-void IOTFIYManager::config(const char* ssid, const char* password, const char* mqtt_server, 
-                          const char* mqtt_client_id, const char* device_id, int mqtt_port,
-                          const char* mqtt_username, const char* mqtt_password) {
+void IOTFIYManager::config(const char* ssid, const char* password, const char* device_id) {
+  // Fixed IOTFIY gateway MQTT settings (not user-configurable)
+  static const char* kMqttServer = "gateway.iotfiysolutions.com";
+  static const int kMqttPort = 1883;
+  static const char* kMqttUsername = "mqttuser";
+  static const char* kMqttPassword = "Growmore12345@";
+
   _config.ssid(ssid)
          .password(password)
-         .server(mqtt_server)
-         .port(mqtt_port)
-         .clientId(mqtt_client_id)
+         .server(kMqttServer)
+         .port(kMqttPort)
          .deviceId(device_id)
-         .mqttUsername(mqtt_username)
-         .mqttPassword(mqtt_password);
+         .mqttUsername(kMqttUsername)
+         .mqttPassword(kMqttPassword);
 }
 
 // Create a single global instance
 IOTFIYManager IOTFIY;
 
+const char* IOTFIYManager::resolveCapabilityName(const char* name, const char* pin) {
+  if (name == nullptr || name[0] == '\0') {
+    return pin;
+  }
+  return name;
+}
+
+Send* IOTFIYManager::write(const char* pin, float* dataSource) {
+  return write(pin, pin, dataSource);
+}
+
+Send* IOTFIYManager::write(const char* pin, float* dataSource, float min, float max) {
+  return write(pin, pin, dataSource, min, max);
+}
+
+Send* IOTFIYManager::write(const char* pin, int* dataSource) {
+  return write(pin, pin, dataSource);
+}
+
+Send* IOTFIYManager::write(const char* pin, int* dataSource, float min, float max) {
+  return write(pin, pin, dataSource, min, max);
+}
+
+Send* IOTFIYManager::write(const char* pin, bool* dataSource) {
+  return write(pin, pin, dataSource);
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, float* dataSource) {
+  if (_sendCount >= MAX_SENDS) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, "float", pin, dataSource, &_mqttClient, &_config);
+  _sends[_sendCount++] = send;
+  return send;
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, float* dataSource, float min, float max) {
+  if (_sendCount >= MAX_SENDS) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, "float", pin, dataSource, &_mqttClient, &_config, min, max);
+  _sends[_sendCount++] = send;
+  return send;
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, int* dataSource) {
+  if (_sendCount >= MAX_SENDS) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, "integer", pin, dataSource, &_mqttClient, &_config);
+  _sends[_sendCount++] = send;
+  return send;
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, int* dataSource, float min, float max) {
+  if (_sendCount >= MAX_SENDS) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, "integer", pin, dataSource, &_mqttClient, &_config, min, max);
+  _sends[_sendCount++] = send;
+  return send;
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, bool* dataSource) {
+  if (_sendCount >= MAX_SENDS) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, "boolean", pin, dataSource, &_mqttClient, &_config);
+  _sends[_sendCount++] = send;
+  return send;
+}
+
 Send* IOTFIYManager::write(const char* name, const char* type, const char* pin, float* dataSource) {
   if (_sendCount >= MAX_SENDS) return nullptr;
-  
-  Send* send = new Send(name, type, pin, dataSource, &_mqttClient, &_config);
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, type, pin, dataSource, &_mqttClient, &_config);
   _sends[_sendCount++] = send;
   return send;
 }
 
-Send* IOTFIYManager::write(const char* name, const char* type, const char* pin, 
-                     float* dataSource, float min, float max) {
+Send* IOTFIYManager::write(const char* name, const char* type, const char* pin,
+                           float* dataSource, float min, float max) {
   if (_sendCount >= MAX_SENDS) return nullptr;
-  
-  Send* send = new Send(name, type, pin, dataSource, &_mqttClient, &_config, min, max);
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Send* send = new Send(resolvedName, type, pin, dataSource, &_mqttClient, &_config, min, max);
   _sends[_sendCount++] = send;
   return send;
 }
 
-Receive* IOTFIYManager::read(const char* name, const char* type, const char* pin, float* entryPoint) {
+Receive* IOTFIYManager::read(const char* pin, float* entryPoint) {
+  return read(pin, pin, entryPoint);
+}
+
+Receive* IOTFIYManager::read(const char* pin, float* entryPoint, float min, float max) {
+  return read(pin, pin, entryPoint, min, max);
+}
+
+Receive* IOTFIYManager::read(const char* pin, int* entryPoint) {
+  return read(pin, pin, entryPoint);
+}
+
+Receive* IOTFIYManager::read(const char* pin, int* entryPoint, float min, float max) {
+  return read(pin, pin, entryPoint, min, max);
+}
+
+Receive* IOTFIYManager::read(const char* pin, bool* entryPoint) {
+  return read(pin, pin, entryPoint);
+}
+
+Receive* IOTFIYManager::read(const char* pin, String* entryPoint) {
+  return read(pin, pin, entryPoint);
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* pin, float* entryPoint) {
   if (_receiveCount >= MAX_RECEIVES) return nullptr;
-  
-  Receive* receive = new Receive(name, type, pin, entryPoint, &_mqttClient, &_config);
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, "float", pin, entryPoint, &_mqttClient, &_config);
   _receives[_receiveCount++] = receive;
   return receive;
 }
 
-Receive* IOTFIYManager::read(const char* name, const char* type, const char* pin, 
-                   float* entryPoint, float min, float max) {
+Receive* IOTFIYManager::read(const char* name, const char* pin, float* entryPoint, float min, float max) {
   if (_receiveCount >= MAX_RECEIVES) return nullptr;
-  
-  Receive* receive = new Receive(name, type, pin, entryPoint, &_mqttClient, &_config, min, max);
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, "float", pin, entryPoint, &_mqttClient, &_config, min, max);
+  _receives[_receiveCount++] = receive;
+  return receive;
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* pin, int* entryPoint) {
+  if (_receiveCount >= MAX_RECEIVES) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, "integer", pin, entryPoint, &_mqttClient, &_config);
+  _receives[_receiveCount++] = receive;
+  return receive;
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* pin, int* entryPoint, float min, float max) {
+  if (_receiveCount >= MAX_RECEIVES) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, "integer", pin, entryPoint, &_mqttClient, &_config, min, max);
+  _receives[_receiveCount++] = receive;
+  return receive;
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* pin, bool* entryPoint) {
+  if (_receiveCount >= MAX_RECEIVES) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, "boolean", pin, entryPoint, &_mqttClient, &_config);
+  _receives[_receiveCount++] = receive;
+  return receive;
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* pin, String* entryPoint) {
+  if (_receiveCount >= MAX_RECEIVES) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, "string", pin, entryPoint, &_mqttClient, &_config);
+  _receives[_receiveCount++] = receive;
+  return receive;
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* type, const char* pin, float* entryPoint) {
+  if (_receiveCount >= MAX_RECEIVES) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, type, pin, entryPoint, &_mqttClient, &_config);
+  _receives[_receiveCount++] = receive;
+  return receive;
+}
+
+Receive* IOTFIYManager::read(const char* name, const char* type, const char* pin,
+                             float* entryPoint, float min, float max) {
+  if (_receiveCount >= MAX_RECEIVES) return nullptr;
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, type, pin, entryPoint, &_mqttClient, &_config, min, max);
   _receives[_receiveCount++] = receive;
   return receive;
 }
 
 Receive* IOTFIYManager::read(const char* name, const char* type, const char* pin, String* entryPoint) {
   if (_receiveCount >= MAX_RECEIVES) return nullptr;
-
-  Receive* receive = new Receive(name, type, pin, entryPoint, &_mqttClient, &_config);
+  const char* resolvedName = resolveCapabilityName(name, pin);
+  Receive* receive = new Receive(resolvedName, type, pin, entryPoint, &_mqttClient, &_config);
   _receives[_receiveCount++] = receive;
   return receive;
 }

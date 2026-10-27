@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 
-// ESP32 uses WiFi.h; ESP8266 uses ESP8266WiFi.h (same WiFiClient / WiFi API surface)
 #if defined(ESP8266)
   #include <ESP8266WiFi.h>
 #elif defined(ESP32)
@@ -28,59 +27,75 @@ class IOTFIYManager {
 private:
   static const int MAX_SENDS = 10;
   static const int MAX_RECEIVES = 10;
-  
-  // Storage arrays
+
   Send* _sends[MAX_SENDS];
   Receive* _receives[MAX_RECEIVES];
   int _sendCount = 0;
   int _receiveCount = 0;
-  
-  // Connection management
+
   WiFiClient _wifiClient;
   PubSubClient _mqttClient;
   DeviceConfig _config;
-  bool _lwtEnabled = false;
-  
-  // Process incoming commands
-  void handleCallback(char* topic, byte* payload, unsigned int length);
-  
-public:
-  // Constructor
-  IOTFIYManager();
-  
-  // Config access
-  DeviceConfig& config();
-  
-  // Initialize
-  void begin();
+  bool _lastWifiOk = false;
+  bool _lastMqttOk = false;
+  bool _statusInitialized = false;
 
-  // MQTT Last Will: broker publishes offline on unexpected disconnect
-  void enableLWT(bool enabled = true);
-  
-  // Registration and publishing
+  void handleCallback(char* topic, byte* payload, unsigned int length);
+  bool reconnectMQTT();
+  bool checkAndReconnectWiFi();
+  void processMQTTMessages();
+  void printConnectionStatus(bool wifiOk, bool mqttOk);
+  static const char* resolveCapabilityName(const char* name, const char* pin);
+
+public:
+  IOTFIYManager();
+  DeviceConfig& config();
+  void begin();
   void registerAllCapabilities();
   void launch();
   bool publishStringOutput(const char* name, const char* pin, const String& value);
-  
-  // Connection management
-  bool reconnectMQTT();
-  bool checkAndReconnectWiFi();
   bool isMQTTConnected();
-  void processMQTTMessages();
-  
-  // Direct configuration method
-  void config(const char* ssid, const char* password, const char* mqtt_server, 
-              const char* mqtt_client_id, const char* device_id, int mqtt_port = 1883,
-              const char* mqtt_username = "", const char* mqtt_password = "");
-  
+  // device_id: plain or Base64 (decoded internally); also used as MQTT client id
+  void config(const char* ssid, const char* password, const char* device_id);
+
+  // Type is inferred from the variable pointer:
+  //   float* → "float", int* → "integer", bool* → "boolean", String* → "string"
+  // Name is optional — omit it and pin is used as the name.
+
+  Send* write(const char* pin, float* dataSource);
+  Send* write(const char* pin, float* dataSource, float min, float max);
+  Send* write(const char* pin, int* dataSource);
+  Send* write(const char* pin, int* dataSource, float min, float max);
+  Send* write(const char* pin, bool* dataSource);
+  Send* write(const char* name, const char* pin, float* dataSource);
+  Send* write(const char* name, const char* pin, float* dataSource, float min, float max);
+  Send* write(const char* name, const char* pin, int* dataSource);
+  Send* write(const char* name, const char* pin, int* dataSource, float min, float max);
+  Send* write(const char* name, const char* pin, bool* dataSource);
+
+  // Explicit type still supported (float* storage)
   Send* write(const char* name, const char* type, const char* pin, float* dataSource);
   Send* write(const char* name, const char* type, const char* pin, float* dataSource, float min, float max);
+
+  Receive* read(const char* pin, float* entryPoint);
+  Receive* read(const char* pin, float* entryPoint, float min, float max);
+  Receive* read(const char* pin, int* entryPoint);
+  Receive* read(const char* pin, int* entryPoint, float min, float max);
+  Receive* read(const char* pin, bool* entryPoint);
+  Receive* read(const char* pin, String* entryPoint);
+  Receive* read(const char* name, const char* pin, float* entryPoint);
+  Receive* read(const char* name, const char* pin, float* entryPoint, float min, float max);
+  Receive* read(const char* name, const char* pin, int* entryPoint);
+  Receive* read(const char* name, const char* pin, int* entryPoint, float min, float max);
+  Receive* read(const char* name, const char* pin, bool* entryPoint);
+  Receive* read(const char* name, const char* pin, String* entryPoint);
+
+  // Explicit type still supported
   Receive* read(const char* name, const char* type, const char* pin, float* entryPoint);
   Receive* read(const char* name, const char* type, const char* pin, float* entryPoint, float min, float max);
   Receive* read(const char* name, const char* type, const char* pin, String* entryPoint);
 };
 
-// Global instance declaration
 extern IOTFIYManager IOTFIY;
 
 #endif // IOTFIY_H

@@ -1,129 +1,208 @@
 #include "Receive.h"
 
-// Constructor for receives without range
 Receive::Receive(const char* name, const char* type, const char* pin, float* entryPoint,
-        PubSubClient* client, DeviceConfig* config) {
+                 PubSubClient* client, DeviceConfig* config) {
   _client = client;
   _config = config;
   this->name = name;
   this->type = type;
   this->pin = pin;
-  this->entryPoint = entryPoint;
-  this->stringEntryPoint = nullptr;
-  this->hasRange = false;
-  this->isRegistered = false;
+  kind = KIND_FLOAT;
+  floatEntry = entryPoint;
+  intEntry = nullptr;
+  boolEntry = nullptr;
+  stringEntry = nullptr;
+  hasRange = false;
+  isRegistered = false;
 }
 
-// Constructor for receives with range
 Receive::Receive(const char* name, const char* type, const char* pin, float* entryPoint,
-        PubSubClient* client, DeviceConfig* config, float min, float max) {
+                 PubSubClient* client, DeviceConfig* config, float min, float max) {
   _client = client;
   _config = config;
   this->name = name;
   this->type = type;
   this->pin = pin;
-  this->entryPoint = entryPoint;
-  this->stringEntryPoint = nullptr;
-  this->hasRange = true;
+  kind = KIND_FLOAT;
+  floatEntry = entryPoint;
+  intEntry = nullptr;
+  boolEntry = nullptr;
+  stringEntry = nullptr;
+  hasRange = true;
   this->min = min;
   this->max = max;
-  this->isRegistered = false;
+  isRegistered = false;
+}
+
+Receive::Receive(const char* name, const char* type, const char* pin, int* entryPoint,
+                 PubSubClient* client, DeviceConfig* config) {
+  _client = client;
+  _config = config;
+  this->name = name;
+  this->type = type;
+  this->pin = pin;
+  kind = KIND_INT;
+  floatEntry = nullptr;
+  intEntry = entryPoint;
+  boolEntry = nullptr;
+  stringEntry = nullptr;
+  hasRange = false;
+  isRegistered = false;
+}
+
+Receive::Receive(const char* name, const char* type, const char* pin, int* entryPoint,
+                 PubSubClient* client, DeviceConfig* config, float min, float max) {
+  _client = client;
+  _config = config;
+  this->name = name;
+  this->type = type;
+  this->pin = pin;
+  kind = KIND_INT;
+  floatEntry = nullptr;
+  intEntry = entryPoint;
+  boolEntry = nullptr;
+  stringEntry = nullptr;
+  hasRange = true;
+  this->min = min;
+  this->max = max;
+  isRegistered = false;
+}
+
+Receive::Receive(const char* name, const char* type, const char* pin, bool* entryPoint,
+                 PubSubClient* client, DeviceConfig* config) {
+  _client = client;
+  _config = config;
+  this->name = name;
+  this->type = type;
+  this->pin = pin;
+  kind = KIND_BOOL;
+  floatEntry = nullptr;
+  intEntry = nullptr;
+  boolEntry = entryPoint;
+  stringEntry = nullptr;
+  hasRange = false;
+  isRegistered = false;
 }
 
 Receive::Receive(const char* name, const char* type, const char* pin, String* stringEntryPoint,
-        PubSubClient* client, DeviceConfig* config) {
+                 PubSubClient* client, DeviceConfig* config) {
   _client = client;
   _config = config;
   this->name = name;
   this->type = type;
   this->pin = pin;
-  this->entryPoint = nullptr;
-  this->stringEntryPoint = stringEntryPoint;
-  this->hasRange = false;
-  this->isRegistered = false;
+  kind = KIND_STRING;
+  floatEntry = nullptr;
+  intEntry = nullptr;
+  boolEntry = nullptr;
+  stringEntry = stringEntryPoint;
+  hasRange = false;
+  isRegistered = false;
 }
 
-// Getters
 const char* Receive::getName() { return name; }
 const char* Receive::getType() { return type; }
 const char* Receive::getPin() { return pin; }
-float* Receive::getEntryPoint() { return entryPoint; }
+float* Receive::getEntryPoint() { return floatEntry; }
 
-// Register capability without description
 bool Receive::registerCapability() {
   DynamicJsonDocument receiveDoc(200);
   receiveDoc["deviceId"] = _config->getDeviceID();
   receiveDoc["type"] = "capabilities_control";
   receiveDoc["controlName"] = name;
-  
+
   JsonObject receive = receiveDoc.createNestedObject("control");
   receive["type"] = type;
   receive["pin"] = pin;
-  
-  // Add min/max only for numeric types
-  if (strcmp(type, "float") == 0 || strcmp(type, "integer") == 0) {
-    if (hasRange) {
-      receive["min"] = min;
-      receive["max"] = max;
-    }
+
+  if ((strcmp(type, "float") == 0 || strcmp(type, "integer") == 0) && hasRange) {
+    receive["min"] = min;
+    receive["max"] = max;
   }
-  
+
   String receivePayload;
   serializeJson(receiveDoc, receivePayload);
-  
+
   String topic = String("devices/") + _config->getDeviceID() + "/capabilities_control/" + name;
   bool published = _client->publish(topic.c_str(), receivePayload.c_str(), true);
-  
+
   Serial.print(name);
   Serial.print(" control published: ");
   Serial.println(published ? "SUCCESS" : "FAILED");
-  
+
   if (published) {
     isRegistered = true;
   }
-  
+
   delay(defaultDelay);
   return published;
 }
 
-// Handle command (will need to be overridden in child classes)
 bool Receive::handleCommand(const JsonVariantConst& value, JsonObject& result) {
-  // For basic types we can handle automatically
-  if (strcmp(type, "float") == 0) {
-    float floatValue = value.as<float>();
-    *entryPoint = floatValue;  // Write to the variable
-    result["newState"] = floatValue;
-    return true;
-  }
-  else if (strcmp(type, "integer") == 0) {
-    int intValue = value.as<int>();
-    *entryPoint = intValue;  // Write to the variable
-    result["newState"] = intValue;
-    return true;
-  }
-  else if (strcmp(type, "boolean") == 0) {
+  // Prefer explicit capability type string, then pointer kind
+  const bool asString = (strcmp(type, "string") == 0) || (kind == KIND_STRING);
+  const bool asBool = (strcmp(type, "boolean") == 0) || (kind == KIND_BOOL);
+  const bool asInt = (strcmp(type, "integer") == 0) || (kind == KIND_INT);
+  const bool asFloat = (strcmp(type, "float") == 0) || (kind == KIND_FLOAT);
+
+  if (asString) {
     String strValue = value.as<String>();
-    // Convert boolean string to numeric value (0 or 1)
-    float boolValue = (strValue == "on" || strValue == "true" || strValue == "1") ? 1.0f : 0.0f;
-    *entryPoint = boolValue;  // Write to the variable
-    result["newState"] = strValue;
-    return true;
-  }
-  else if (strcmp(type, "string") == 0) {
-    String strValue = value.as<String>();
-    if (stringEntryPoint) {
-      *stringEntryPoint = strValue;
+    if (stringEntry) {
+      *stringEntry = strValue;
     }
-    if (entryPoint) {
-      *entryPoint = 1.0f;
+    if (floatEntry) {
+      *floatEntry = 1.0f;
     }
     Serial.print("String control ");
     Serial.print(pin);
     Serial.print(" = ");
     Serial.println(strValue);
     result["newState"] = strValue;
+    return stringEntry != nullptr || floatEntry != nullptr;
+  }
+
+  if (asBool) {
+    bool boolValue = false;
+    if (value.is<bool>()) {
+      boolValue = value.as<bool>();
+    } else {
+      String strValue = value.as<String>();
+      strValue.toLowerCase();
+      boolValue = (strValue == "on" || strValue == "true" || strValue == "1");
+    }
+    if (boolEntry) {
+      *boolEntry = boolValue;
+    } else if (floatEntry) {
+      *floatEntry = boolValue ? 1.0f : 0.0f;
+    } else {
+      return false;
+    }
+    result["newState"] = boolValue;
     return true;
   }
-  
+
+  if (asInt) {
+    int intValue = value.as<int>();
+    if (intEntry) {
+      *intEntry = intValue;
+    } else if (floatEntry) {
+      *floatEntry = (float)intValue;
+    } else {
+      return false;
+    }
+    result["newState"] = intValue;
+    return true;
+  }
+
+  if (asFloat) {
+    if (!floatEntry) {
+      return false;
+    }
+    float floatValue = value.as<float>();
+    *floatEntry = floatValue;
+    result["newState"] = floatValue;
+    return true;
+  }
+
   return false;
 }

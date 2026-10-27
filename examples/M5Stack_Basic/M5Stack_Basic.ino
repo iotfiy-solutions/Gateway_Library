@@ -1,24 +1,25 @@
+/*
+  IOTFIY — M5Stack Basic example (ESP32 + M5Unified)
+
+  Board:     Tools → Board → ESP32 Arduino → your M5 module
+  Libraries: M5Unified, PubSubClient, ArduinoJson, IOTFIY
+
+  write() / read():
+    - Type is inferred from the variable
+    - Name is optional (defaults to pin)
+*/
+
 #include <M5Unified.h>
 #include <IOTFIY.h>
-// WiFi comes from IOTFIY.h (ESP32 → WiFi.h / ESP8266 → ESP8266WiFi.h)
 
-// WiFi
-const char* WIFI_SSID     = "IOTF2";
-const char* WIFI_PASSWORD = "Gromore1";
+const char* WIFI_SSID     = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* DEVICE_ID     = "device_m5_1";
 
-// MQTT / device — fill these in
-const char* MQTT_SERVER    = "mqtt://localhost";
-const char* MQTT_CLIENT_ID = "";
-const char* DEVICE_ID      = "device_C";
-const int   MQTT_PORT      = 1883;
-
-// Values sent to the IOTFIY frontend when buttons are pressed
-float btnAValue = 0;
-float btnBValue = 0;
-float btnCValue = 0;
-
-// Value received from the IOTFIY dashboard
-float receivedNumber = 0;
+int btnAValue = 0;   // → type "integer"
+int btnBValue = 0;
+int btnCValue = 0;
+float receivedNumber = 0;  // → type "float"
 
 float lastShownNumber = -9999;
 char lastButton[2] = "-";
@@ -41,7 +42,6 @@ void drawScreen() {
   M5.Display.drawString(lastMqttOk ? "MQTT: OK" : "MQTT: ...", M5.Display.width() / 2, 52);
 
   M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
-  M5.Display.setTextSize(1);
   M5.Display.drawString("Dashboard number", M5.Display.width() / 2, 80);
 
   M5.Display.setTextSize(4);
@@ -51,20 +51,19 @@ void drawScreen() {
   M5.Display.setTextSize(1);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.drawString(String("Last button: ") + lastButton, M5.Display.width() / 2, M5.Display.height() - 40);
-
   M5.Display.drawString("A          B          C", M5.Display.width() / 2, M5.Display.height() - 18);
 }
 
-void sendButton(const char* name, float* value) {
+void sendButton(const char* label, int* value) {
   *value = 1;
-  strncpy(lastButton, name, sizeof(lastButton));
+  strncpy(lastButton, label, sizeof(lastButton));
   lastButton[sizeof(lastButton) - 1] = '\0';
 
   IOTFIY.launch();
   drawScreen();
 
-  Serial.print("Sent button ");
-  Serial.println(name);
+  Serial.print(F("Sent button "));
+  Serial.println(label);
 }
 
 void setup() {
@@ -78,20 +77,15 @@ void setup() {
 
   drawScreen();
 
-  IOTFIY.config(WIFI_SSID, WIFI_PASSWORD, MQTT_SERVER, MQTT_CLIENT_ID, DEVICE_ID, MQTT_PORT);
-
-  IOTFIY.checkAndReconnectWiFi();
+  IOTFIY.config(WIFI_SSID, WIFI_PASSWORD, DEVICE_ID);
   IOTFIY.begin();
 
-  // Buttons A / B / C -> frontend (IOTFIY.write)
-  IOTFIY.write("ButtonA", "integer", "BtnA", &btnAValue);
-  IOTFIY.write("ButtonB", "integer", "BtnB", &btnBValue);
-  IOTFIY.write("ButtonC", "integer", "BtnC", &btnCValue);
+  IOTFIY.write("BtnA", &btnAValue);
+  IOTFIY.write("BtnB", &btnBValue);
+  IOTFIY.write("BtnC", &btnCValue);
+  IOTFIY.read("Display", &receivedNumber);
 
-  // Dashboard command / number -> M5 screen (IOTFIY.read)
-  IOTFIY.read("DashboardNumber", "float", "Display", &receivedNumber);
-
-  IOTFIY.reconnectMQTT();
+  IOTFIY.launch();
 
   lastWifiOk = (WiFi.status() == WL_CONNECTED);
   lastMqttOk = IOTFIY.isMQTTConnected();
@@ -101,12 +95,7 @@ void setup() {
 
 void loop() {
   M5.update();
-
-  IOTFIY.checkAndReconnectWiFi();
-  if (!IOTFIY.isMQTTConnected()) {
-    IOTFIY.reconnectMQTT();
-  }
-  IOTFIY.processMQTTMessages();
+  IOTFIY.launch();
 
   if (M5.BtnA.wasPressed()) {
     btnBValue = 0;

@@ -12,12 +12,14 @@ private:
   // MQTT Broker settings
   String _mqtt_server;
   int _mqtt_port = 1883; // Default value
-  String _mqtt_client_id;
   String _mqtt_username;
   String _mqtt_password;
   
-  // Device info
+  // Device info (also used as MQTT client id). May be set from Base64 input.
   String _device_id;
+
+  // If value is valid Base64 of a printable device id, return decoded; else original.
+  static String resolveDeviceId(const char* value);
 
 public:
   // Default constructor
@@ -28,7 +30,7 @@ public:
   DeviceConfig& password(const char* value);
   DeviceConfig& server(const char* value);
   DeviceConfig& port(int value);
-  DeviceConfig& clientId(const char* value);
+  // Accepts plain device id or Base64-encoded device id (decoded internally)
   DeviceConfig& deviceId(const char* value);
   DeviceConfig& mqttUsername(const char* value);
   DeviceConfig& mqttPassword(const char* value);
@@ -38,7 +40,6 @@ public:
   const char* getPassword() const;
   const char* getMQTTServer() const;
   int getMQTTPort() const;
-  const char* getMQTTClientID() const;
   const char* getDeviceID() const;
   const char* getMQTTUsername() const;
   const char* getMQTTPassword() const;
