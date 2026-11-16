@@ -54,7 +54,6 @@ void setup() {
   IOTFIY.write("A0", &sensorValue);
   IOTFIY.read("Ctrl", &controlValue, 0, 100);
 
-  IOTFIY.launch();
 }
 
 void loop() {

@@ -59,7 +59,6 @@ void sendButton(const char* label, int* value) {
   strncpy(lastButton, label, sizeof(lastButton));
   lastButton[sizeof(lastButton) - 1] = '\0';
 
-  IOTFIY.launch();
   drawScreen();
 
   Serial.print(F("Sent button "));
@@ -85,7 +84,6 @@ void setup() {
   IOTFIY.write("BtnC", &btnCValue);
   IOTFIY.read("Display", &receivedNumber);
 
-  IOTFIY.launch();
 
   lastWifiOk = (WiFi.status() == WL_CONNECTED);
   lastMqttOk = IOTFIY.isMQTTConnected();

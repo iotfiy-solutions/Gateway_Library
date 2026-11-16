@@ -28,6 +28,7 @@ private:
   int defaultDelay = 50;
   bool hasLastPublished = false;
   float lastPublishedValue = 0;
+  bool storeHistorical = false;
 
   float readValue() const;
   void writeValue(float value);
@@ -54,9 +55,10 @@ public:
   float getCurrentValue();
 
   void setDelay(int ms);
+  void setStore(bool store);
   void resetPublishState();
   bool registerCapability();
-  bool publishData();
+  bool publishData(bool force = false);
 };
 
 #endif // SEND_H

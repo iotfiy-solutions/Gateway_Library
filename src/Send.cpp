@@ -113,6 +113,8 @@ float Send::getCurrentValue() { return readValue(); }
 
 void Send::setDelay(int ms) { defaultDelay = ms; }
 
+void Send::setStore(bool store) { storeHistorical = store; }
+
 void Send::resetPublishState() {
   hasLastPublished = false;
   isRegistered = false;
@@ -147,7 +149,7 @@ bool Send::registerCapability() {
   return published;
 }
 
-bool Send::publishData() {
+bool Send::publishData(bool force) {
   float value = readValue();
 
   if (hasRange && max > min) {
@@ -160,7 +162,7 @@ bool Send::publishData() {
     }
   }
 
-  if (hasLastPublished && value == lastPublishedValue) {
+  if (!force && hasLastPublished && value == lastPublishedValue) {
     return true;
   }
 
@@ -171,6 +173,7 @@ bool Send::publishData() {
   DynamicJsonDocument dataDoc(256);
   dataDoc["type"] = "output";
   dataDoc["deviceId"] = _config->getDeviceID();
+  dataDoc["store"] = storeHistorical;
   JsonObject data = dataDoc.createNestedObject("data");
 
   // Backend expects numeric values (0/1 for boolean, ints for integer)

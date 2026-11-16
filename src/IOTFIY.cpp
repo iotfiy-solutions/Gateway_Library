@@ -53,6 +53,12 @@ void IOTFIYManager::registerAllCapabilities() {
 
 // Maintain WiFi/MQTT, process commands, then publish all send data
 void IOTFIYManager::launch() {
+  launch(0);
+}
+
+// intervalMs == 0: publish on change (default)
+// intervalMs  > 0: publish current write values every intervalMs milliseconds
+void IOTFIYManager::launch(unsigned long intervalMs) {
   bool wifiOk = checkAndReconnectWiFi();
 
   if (wifiOk && !_mqttClient.connected()) {
@@ -75,8 +81,25 @@ void IOTFIYManager::launch() {
     return;
   }
 
+  if (intervalMs == 0) {
+    for (int i = 0; i < _sendCount; i++) {
+      _sends[i]->publishData();
+    }
+    return;
+  }
+
+  unsigned long now = millis();
+  if (_lastDataPublishMs == 0) {
+    _lastDataPublishMs = now;
+    return;
+  }
+  if ((now - _lastDataPublishMs) < intervalMs) {
+    return;
+  }
+
+  _lastDataPublishMs = now;
   for (int i = 0; i < _sendCount; i++) {
-    _sends[i]->publishData();
+    _sends[i]->publishData(true);
   }
 }
 
@@ -406,6 +429,7 @@ void IOTFIYManager::config(const char* ssid, const char* password, const char* d
 
 // Create a single global instance
 IOTFIYManager IOTFIY;
+const StoreNamedArg store;
 
 const char* IOTFIYManager::resolveCapabilityName(const char* name, const char* pin) {
   if (name == nullptr || name[0] == '\0') {
@@ -418,75 +442,131 @@ Send* IOTFIYManager::write(const char* pin, float* dataSource) {
   return write(pin, pin, dataSource);
 }
 
+Send* IOTFIYManager::write(const char* pin, float* dataSource, StoreOption storeOpt) {
+  return write(pin, pin, dataSource, storeOpt);
+}
+
 Send* IOTFIYManager::write(const char* pin, float* dataSource, float min, float max) {
   return write(pin, pin, dataSource, min, max);
+}
+
+Send* IOTFIYManager::write(const char* pin, float* dataSource, float min, float max, StoreOption storeOpt) {
+  return write(pin, pin, dataSource, min, max, storeOpt);
 }
 
 Send* IOTFIYManager::write(const char* pin, int* dataSource) {
   return write(pin, pin, dataSource);
 }
 
+Send* IOTFIYManager::write(const char* pin, int* dataSource, StoreOption storeOpt) {
+  return write(pin, pin, dataSource, storeOpt);
+}
+
 Send* IOTFIYManager::write(const char* pin, int* dataSource, float min, float max) {
   return write(pin, pin, dataSource, min, max);
+}
+
+Send* IOTFIYManager::write(const char* pin, int* dataSource, float min, float max, StoreOption storeOpt) {
+  return write(pin, pin, dataSource, min, max, storeOpt);
 }
 
 Send* IOTFIYManager::write(const char* pin, bool* dataSource) {
   return write(pin, pin, dataSource);
 }
 
+Send* IOTFIYManager::write(const char* pin, bool* dataSource, StoreOption storeOpt) {
+  return write(pin, pin, dataSource, storeOpt);
+}
+
 Send* IOTFIYManager::write(const char* name, const char* pin, float* dataSource) {
+  return write(name, pin, dataSource, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, float* dataSource, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, "float", pin, dataSource, &_mqttClient, &_config);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
 
 Send* IOTFIYManager::write(const char* name, const char* pin, float* dataSource, float min, float max) {
+  return write(name, pin, dataSource, min, max, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, float* dataSource, float min, float max, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, "float", pin, dataSource, &_mqttClient, &_config, min, max);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
 
 Send* IOTFIYManager::write(const char* name, const char* pin, int* dataSource) {
+  return write(name, pin, dataSource, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, int* dataSource, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, "integer", pin, dataSource, &_mqttClient, &_config);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
 
 Send* IOTFIYManager::write(const char* name, const char* pin, int* dataSource, float min, float max) {
+  return write(name, pin, dataSource, min, max, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, int* dataSource, float min, float max, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, "integer", pin, dataSource, &_mqttClient, &_config, min, max);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
 
 Send* IOTFIYManager::write(const char* name, const char* pin, bool* dataSource) {
+  return write(name, pin, dataSource, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* pin, bool* dataSource, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, "boolean", pin, dataSource, &_mqttClient, &_config);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
 
 Send* IOTFIYManager::write(const char* name, const char* type, const char* pin, float* dataSource) {
+  return write(name, type, pin, dataSource, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* type, const char* pin, float* dataSource, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, type, pin, dataSource, &_mqttClient, &_config);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
 
 Send* IOTFIYManager::write(const char* name, const char* type, const char* pin,
                            float* dataSource, float min, float max) {
+  return write(name, type, pin, dataSource, min, max, StoreOption(false));
+}
+
+Send* IOTFIYManager::write(const char* name, const char* type, const char* pin,
+                           float* dataSource, float min, float max, StoreOption storeOpt) {
   if (_sendCount >= MAX_SENDS) return nullptr;
   const char* resolvedName = resolveCapabilityName(name, pin);
   Send* send = new Send(resolvedName, type, pin, dataSource, &_mqttClient, &_config, min, max);
+  send->setStore(storeOpt.value);
   _sends[_sendCount++] = send;
   return send;
 }
